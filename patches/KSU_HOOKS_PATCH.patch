@@ -1,6 +1,7 @@
---- ./fs/exec.c	2024-12-19 12:31:30.220864300 -0500
-+++ ./fs/exec.c	2024-12-19 12:41:54.519892326 -0500
-@@ -1895,11 +1895,24 @@
+diff --git a/fs/exec.c b/fs/exec.c
+--- a/fs/exec.c
++++ b/fs/exec.c
+@@ -1862,12 +1862,24 @@ static int do_execveat_common(int fd, struct filename *filename,
  	return retval;
  }
  
@@ -11,112 +12,153 @@
 +extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
 +				 void *argv, void *envp, int *flags);
 +#endif
- static int do_execveat_common(int fd, struct filename *filename,
- 			      struct user_arg_ptr argv,
- 			      struct user_arg_ptr envp,
- 			      int flags)
++
+ int do_execve(struct filename *filename,
+ 	const char __user *const __user *__argv,
+ 	const char __user *const __user *__envp)
  {
+ 	struct user_arg_ptr argv = { .ptr.native = __argv };
+ 	struct user_arg_ptr envp = { .ptr.native = __envp };
 +#ifdef CONFIG_KSU
++	int fd = AT_FDCWD, flags = 0;
 +	if (unlikely(ksu_execveat_hook))
 +		ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
 +	else
 +		ksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);
 +#endif
- 	return __do_execve_file(fd, filename, argv, envp, flags, NULL);
+ 	return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);
  }
  
---- ./fs/openc	2024-12-19 12:31:30.301864300 -0500
-+++ ./fs/open.c	2024-12-19 12:42:50.813756015 -0500
-@@ -339,6 +339,10 @@
- 	return ksys_fallocate(fd, mode, offset, len);
+@@ -1895,6 +1907,13 @@ static int compat_do_execve(struct filename *filename,
+ 		.is_compat = true,
+ 		.ptr.compat = __envp,
+ 	};
++#ifdef CONFIG_KSU
++	int fd = AT_FDCWD, flags = 0;
++	if (unlikely(ksu_execveat_hook))
++		ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
++	else
++		ksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);
++#endif
+ 	return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);
+ }
+ 
+diff --git a/fs/open.c b/fs/open.c
+--- a/fs/open.c
++++ b/fs/open.c
+@@ -354,6 +354,11 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
+ 	return error;
  }
  
 +#ifdef CONFIG_KSU
-+extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
-+			 int *flags);
++extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user,
++				int *mode, int *flags);
 +#endif
++
  /*
   * access() needs to use the real uid/gid, not the effective uid/gid.
   * We do this by temporarily clearing all FS-related capabilities and
-@@ -352,6 +356,9 @@
- 	struct inode *inode;
+@@ -369,6 +374,10 @@ SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
  	int res;
  	unsigned int lookup_flags = LOOKUP_FOLLOW;
-+	#ifdef CONFIG_KSU
-+	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
-+	#endif
  
++#ifdef CONFIG_KSU
++	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
++#endif
++
  	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
  		return -EINVAL;
---- ./fs/read_write.c	2024-12-19 12:31:30.310864300 -0500
-+++ ./fs/read_write.c	2024-12-19 12:44:12.681568152 -0500
-@@ -434,9 +434,18 @@
+ 
+diff --git a/fs/read_write.c b/fs/read_write.c
+--- a/fs/read_write.c
++++ b/fs/read_write.c
+@@ -568,11 +568,20 @@ static inline void file_pos_write(struct file *file, loff_t pos)
+ 		file->f_pos = pos;
  }
- EXPORT_SYMBOL(kernel_read);
  
 +#ifdef CONFIG_KSU
 +extern bool ksu_vfs_read_hook __read_mostly;
 +extern int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
 +			size_t *count_ptr, loff_t **pos);
 +#endif
- ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
++
+ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
  {
- 	ssize_t ret;
-+	#ifdef CONFIG_KSU 
-+	if (unlikely(ksu_vfs_read_hook))
-+		ksu_handle_vfs_read(&file, &buf, &count, &pos);
-+	#endif
+ 	struct fd f = fdget_pos(fd);
+ 	ssize_t ret = -EBADF;
  
- 	if (!(file->f_mode & FMODE_READ))
- 		return -EBADF;
---- ./fs/stat.c	2024-12-20 05:02:36.125873300 -0500
-+++ ./fs/stat.c	2024-12-20 05:16:35.396093885 -0500
-@@ -162,6 +162,10 @@
- }
- EXPORT_SYMBOL(vfs_statx_fd);
- 
+ 	if (f.file) {
+ 		loff_t pos = file_pos_read(f.file);
 +#ifdef CONFIG_KSU
-+extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
++		if (unlikely(ksu_vfs_read_hook)) {
++			loff_t *pos_ptr = &pos;
++			ksu_handle_vfs_read(&f.file, &buf, &count, &pos_ptr);
++		}
 +#endif
-+
- /**
-  * vfs_statx - Get basic and extra attributes by filename
-  * @dfd: A file descriptor representing the base dir for a relative filename
-@@ -190,6 +194,10 @@
- 	int error = -EINVAL;
- 	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_AUTOMOUNT;
- 
-+#ifdef CONFIG_KSU
-+	ksu_handle_stat(&dfd, &filename, &flags);
-+#endif
-+
- #ifdef CONFIG_KSU_SUSFS_SUS_SU
- 	if (susfs_is_sus_su_hooks_enabled) {
- 		ksu_handle_stat(&dfd, &filename, &flags);
---- ./drivers/input/input.c	2024-12-19 12:31:28.411864300 -0500
-+++ ./drivers/input/input.c	2024-12-19 12:49:07.714120265 -0500
-@@ -378,10 +378,19 @@
- 	return disposition;
+ 		ret = vfs_read(f.file, buf, count, &pos);
+diff --git a/fs/stat.c b/fs/stat.c
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -354,13 +354,20 @@ SYSCALL_DEFINE2(newlstat, const char __user *, filename,
+ 	return cp_new_stat(&stat, statbuf);
  }
  
++#ifdef CONFIG_KSU
++extern int ksu_handle_stat(int *dfd, const char __user **filename_user,
++				int *flags);
++#endif
++
+ #if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)
+ SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
+ 		struct stat __user *, statbuf, int, flag)
+ {
+ 	struct kstat stat;
+ 	int error;
+-
++#ifdef CONFIG_KSU
++	ksu_handle_stat(&dfd, &filename, &flag);
++#endif
+ 	error = vfs_fstatat(dfd, filename, &stat, flag);
+ 	if (error)
+ 		return error;
+@@ -505,6 +512,9 @@ SYSCALL_DEFINE4(fstatat64, int, dfd, const char __user *, filename,
+ 	struct kstat stat;
+ 	int error;
+ 
++#ifdef CONFIG_KSU
++	ksu_handle_stat(&dfd, &filename, &flag);
++#endif
+ 	error = vfs_fstatat(dfd, filename, &stat, flag);
+ 	if (error)
+ 		return error;
+diff --git a/drivers/input/input.c b/drivers/input/input.c
+--- a/drivers/input/input.c
++++ b/drivers/input/input.c
+@@ -436,11 +436,20 @@ static void input_handle_event(struct input_dev *dev,
+  * to 'seed' initial state of a switch or initial position of absolute
+  * axis, etc.
+  */
 +#ifdef CONFIG_KSU
 +extern bool ksu_input_hook __read_mostly;
 +extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
 +#endif
 +
- static void input_handle_event(struct input_dev *dev,
- 			       unsigned int type, unsigned int code, int value)
+ void input_event(struct input_dev *dev,
+ 		 unsigned int type, unsigned int code, int value)
  {
- 	int disposition = input_get_disposition(dev, type, code, &value);
-+	#ifdef CONFIG_KSU
+ 	unsigned long flags;
+ 
++#ifdef CONFIG_KSU
 +	if (unlikely(ksu_input_hook))
 +		ksu_handle_input_handle_event(&type, &code, &value);
-+	#endif
++#endif
++
+ 	if (is_event_supported(type, dev->evbit, EV_MAX)) {
  
- 	if (disposition != INPUT_IGNORE_EVENT && type != EV_SYN)
- 		add_input_randomness(type, code, value);
---- ./fs/devpts/inode.c	2024-12-19 12:31:30.211864300 -0500
-+++ ./fs/devpts/inode.c	2024-12-19 12:50:33.565526211 -0500
+ 		spin_lock_irqsave(&dev->event_lock, flags);
+diff --git a/fs/devpts/inode.c b/fs/devpts/inode.c
+--- a/fs/devpts/inode.c
++++ b/fs/devpts/inode.c
 @@ -599,6 +599,10 @@
  	return dentry;
  }
@@ -132,14 +174,15 @@
   */
  void *devpts_get_priv(struct dentry *dentry)
  {
-+	#ifdef CONFIG_KSU
++#ifdef CONFIG_KSU
 +	ksu_handle_devpts(dentry->d_inode);
-+	#endif
++#endif
  	if (dentry->d_sb->s_magic != DEVPTS_SUPER_MAGIC)
  		return NULL;
  	return dentry->d_fsdata;
---- ./fs/namespace.c	2024-12-19 12:55:30.333301400 -0500
-+++ ./fs/namespace.c	2024-12-19 12:55:40.608151235 -0500
+diff --git a/fs/namespace.c b/fs/namespace.c
+--- a/fs/namespace.c
++++ b/fs/namespace.c
 @@ -1652,6 +1652,39 @@
  }
  #endif
