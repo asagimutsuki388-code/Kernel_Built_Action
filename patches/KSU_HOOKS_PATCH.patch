@@ -66,7 +66,7 @@
  		return -EINVAL;
 --- a/fs/read_write.c
 +++ b/fs/read_write.c
-@@ -434,9 +434,19 @@
+@@ -434,9 +434,20 @@
  }
  EXPORT_SYMBOL(kernel_read);
  
@@ -123,7 +123,7 @@
  		return error;
 --- a/drivers/input/input.c
 +++ b/drivers/input/input.c
-@@ -436,11 +436,20 @@
+@@ -436,11 +436,21 @@
   * to 'seed' initial state of a switch or initial position of absolute
   * axis, etc.
   */
@@ -147,7 +147,7 @@
  		spin_lock_irqsave(&dev->event_lock, flags);
 --- a/fs/devpts/inode.c
 +++ b/fs/devpts/inode.c
-@@ -599,14 +599,22 @@
+@@ -599,14 +599,21 @@
  	return dentry;
  }
  
