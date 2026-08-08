@@ -1,6 +1,6 @@
 --- a/fs/exec.c
 +++ b/fs/exec.c
-@@ -1862,11 +1862,24 @@ static int do_execveat_common(int fd, struct filename *filename,
+@@ -1862,11 +1862,26 @@
  	return retval;
  }
  
@@ -27,7 +27,7 @@
 +#endif
  	return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);
  }
-@@ -1895,5 +1908,12 @@ static int compat_do_execve(struct filename *filename,
+@@ -1895,5 +1910,12 @@
  		.is_compat = true,
  		.ptr.compat = __envp,
  	};
@@ -42,7 +42,7 @@
  }
 --- a/fs/open.c
 +++ b/fs/open.c
-@@ -354,6 +354,11 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
+@@ -354,6 +354,11 @@
  	return error;
  }
  
@@ -54,7 +54,7 @@
  /*
   * access() needs to use the real uid/gid, not the effective uid/gid.
   * We do this by temporarily clearing all FS-related capabilities and
-@@ -369,5 +374,8 @@ SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
+@@ -369,5 +374,9 @@
  	int res;
  	unsigned int lookup_flags = LOOKUP_FOLLOW;
  
@@ -66,9 +66,9 @@
  		return -EINVAL;
 --- a/fs/read_write.c
 +++ b/fs/read_write.c
-@@ -568,11 +568,23 @@ static inline void file_pos_write(struct file *file, loff_t pos)
- 		file->f_pos = pos;
+@@ -434,9 +434,19 @@
  }
+ EXPORT_SYMBOL(kernel_read);
  
 +#ifdef CONFIG_KSU
 +extern bool ksu_vfs_read_hook __read_mostly;
@@ -76,23 +76,20 @@
 +			size_t *count_ptr, loff_t **pos);
 +#endif
 +
- SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
+ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
  {
- 	struct fd f = fdget_pos(fd);
- 	ssize_t ret = -EBADF;
+ 	ssize_t ret;
  
 +#ifdef CONFIG_KSU
-+	if (unlikely(ksu_vfs_read_hook)) {
-+		loff_t *pos_ptr = &pos;
-+		ksu_handle_vfs_read(&f.file, &buf, &count, &pos_ptr);
-+	}
++	if (unlikely(ksu_vfs_read_hook))
++		ksu_handle_vfs_read(&file, &buf, &count, &pos);
 +#endif
- 	if (f.file) {
- 		loff_t pos = file_pos_read(f.file);
- 		ret = vfs_read(f.file, buf, count, &pos);
++
+ 	if (!(file->f_mode & FMODE_READ))
+ 		return -EBADF;
 --- a/fs/stat.c
 +++ b/fs/stat.c
-@@ -354,13 +354,20 @@ SYSCALL_DEFINE2(newlstat, const char __user *, filename,
+@@ -354,13 +354,21 @@
  	return cp_new_stat(&stat, statbuf);
  }
  
@@ -107,14 +104,14 @@
  {
  	struct kstat stat;
  	int error;
--
+ 
 +#ifdef CONFIG_KSU
 +	ksu_handle_stat(&dfd, &filename, &flag);
 +#endif
  	error = vfs_fstatat(dfd, filename, &stat, flag);
  	if (error)
  		return error;
-@@ -505,6 +512,9 @@ SYSCALL_DEFINE4(fstatat64, int, dfd, const char __user *, filename,
+@@ -505,6 +513,9 @@
  	struct kstat stat;
  	int error;
  
@@ -126,7 +123,7 @@
  		return error;
 --- a/drivers/input/input.c
 +++ b/drivers/input/input.c
-@@ -436,11 +436,21 @@ static void input_handle_event(struct input_dev *dev,
+@@ -436,11 +436,20 @@
   * to 'seed' initial state of a switch or initial position of absolute
   * axis, etc.
   */
@@ -150,7 +147,7 @@
  		spin_lock_irqsave(&dev->event_lock, flags);
 --- a/fs/devpts/inode.c
 +++ b/fs/devpts/inode.c
-@@ -599,6 +599,10 @@
+@@ -599,14 +599,22 @@
  	return dentry;
  }
  
@@ -161,7 +158,8 @@
  /**
   * devpts_get_priv -- get private data for a slave
   * @pts_inode: inode of the slave
-@@ -607,6 +611,9 @@
+  *
+  * Returns NULL if the dentry is not a valid devpts slave.
   */
  void *devpts_get_priv(struct dentry *dentry)
  {
