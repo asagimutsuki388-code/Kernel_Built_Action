@@ -1,7 +1,6 @@
-diff --git a/fs/exec.c b/fs/exec.c
 --- a/fs/exec.c
 +++ b/fs/exec.c
-@@ -1862,12 +1862,24 @@ static int do_execveat_common(int fd, struct filename *filename,
+@@ -1862,11 +1862,24 @@ static int do_execveat_common(int fd, struct filename *filename,
  	return retval;
  }
  
@@ -28,8 +27,7 @@ diff --git a/fs/exec.c b/fs/exec.c
 +#endif
  	return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);
  }
- 
-@@ -1895,6 +1907,13 @@ static int compat_do_execve(struct filename *filename,
+@@ -1895,5 +1908,12 @@ static int compat_do_execve(struct filename *filename,
  		.is_compat = true,
  		.ptr.compat = __envp,
  	};
@@ -42,8 +40,6 @@ diff --git a/fs/exec.c b/fs/exec.c
 +#endif
  	return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);
  }
- 
-diff --git a/fs/open.c b/fs/open.c
 --- a/fs/open.c
 +++ b/fs/open.c
 @@ -354,6 +354,11 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
@@ -58,7 +54,7 @@ diff --git a/fs/open.c b/fs/open.c
  /*
   * access() needs to use the real uid/gid, not the effective uid/gid.
   * We do this by temporarily clearing all FS-related capabilities and
-@@ -369,6 +374,10 @@ SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
+@@ -369,5 +374,8 @@ SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
  	int res;
  	unsigned int lookup_flags = LOOKUP_FOLLOW;
  
@@ -68,11 +64,9 @@ diff --git a/fs/open.c b/fs/open.c
 +
  	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
  		return -EINVAL;
- 
-diff --git a/fs/read_write.c b/fs/read_write.c
 --- a/fs/read_write.c
 +++ b/fs/read_write.c
-@@ -568,11 +568,20 @@ static inline void file_pos_write(struct file *file, loff_t pos)
+@@ -568,11 +568,23 @@ static inline void file_pos_write(struct file *file, loff_t pos)
  		file->f_pos = pos;
  }
  
@@ -87,16 +81,15 @@ diff --git a/fs/read_write.c b/fs/read_write.c
  	struct fd f = fdget_pos(fd);
  	ssize_t ret = -EBADF;
  
++#ifdef CONFIG_KSU
++	if (unlikely(ksu_vfs_read_hook)) {
++		loff_t *pos_ptr = &pos;
++		ksu_handle_vfs_read(&f.file, &buf, &count, &pos_ptr);
++	}
++#endif
  	if (f.file) {
  		loff_t pos = file_pos_read(f.file);
-+#ifdef CONFIG_KSU
-+		if (unlikely(ksu_vfs_read_hook)) {
-+			loff_t *pos_ptr = &pos;
-+			ksu_handle_vfs_read(&f.file, &buf, &count, &pos_ptr);
-+		}
-+#endif
  		ret = vfs_read(f.file, buf, count, &pos);
-diff --git a/fs/stat.c b/fs/stat.c
 --- a/fs/stat.c
 +++ b/fs/stat.c
 @@ -354,13 +354,20 @@ SYSCALL_DEFINE2(newlstat, const char __user *, filename,
@@ -131,10 +124,9 @@ diff --git a/fs/stat.c b/fs/stat.c
  	error = vfs_fstatat(dfd, filename, &stat, flag);
  	if (error)
  		return error;
-diff --git a/drivers/input/input.c b/drivers/input/input.c
 --- a/drivers/input/input.c
 +++ b/drivers/input/input.c
-@@ -436,11 +436,20 @@ static void input_handle_event(struct input_dev *dev,
+@@ -436,11 +436,21 @@ static void input_handle_event(struct input_dev *dev,
   * to 'seed' initial state of a switch or initial position of absolute
   * axis, etc.
   */
@@ -156,7 +148,6 @@ diff --git a/drivers/input/input.c b/drivers/input/input.c
  	if (is_event_supported(type, dev->evbit, EV_MAX)) {
  
  		spin_lock_irqsave(&dev->event_lock, flags);
-diff --git a/fs/devpts/inode.c b/fs/devpts/inode.c
 --- a/fs/devpts/inode.c
 +++ b/fs/devpts/inode.c
 @@ -599,6 +599,10 @@
@@ -180,7 +171,6 @@ diff --git a/fs/devpts/inode.c b/fs/devpts/inode.c
  	if (dentry->d_sb->s_magic != DEVPTS_SUPER_MAGIC)
  		return NULL;
  	return dentry->d_fsdata;
-diff --git a/fs/namespace.c b/fs/namespace.c
 --- a/fs/namespace.c
 +++ b/fs/namespace.c
 @@ -1652,6 +1652,39 @@
