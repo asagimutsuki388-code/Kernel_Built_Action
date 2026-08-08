@@ -319,7 +319,7 @@ jobs:
                       CONFIG_KALLSYMS_ALL=y
                      
         do
-        echo "$config" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
+        echo "$config" >> arch/${{ env.KERNEL_ARCH }}/configs/${DEVICE}_defconfig
         done
         
         fi
